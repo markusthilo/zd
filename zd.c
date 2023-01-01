@@ -1,4 +1,4 @@
-/* zd v0.1-20221218 */
+/* zd v0.1-20221231 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -7,28 +7,64 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <windows.h>
+
+/* Error when giving arguments */
+void error_wrong_arg() {
+	fprintf(stderr, "Error: wrong or redundant argument\n");
+	exit(1);
+}
 
 /* Convert string to unsigned long long */
-unsigned long long readullong(char *s) {
-	int l = 0;
-	while (1) {
-		if (s[l] == 0) break;
-		if ( s[l] < '0' | s[l] > '9' ) return 0;
-		l++;
+unsigned long long str_to_ull(char *string) {
+	int pos = 0;
+	while ( string[pos] != 0 ) if ( string[pos] < '0' || string[pos++] > '9' ) error_wrong_arg();
+	unsigned long long factor = 1;
+	unsigned long long result = 0;
+	unsigned long long new;
+	while ( --pos >= 0 ) {
+		new = result + (factor * (string[pos]-'0'));
+		if ( new < result ) return 0;
+		result = new;
+		factor *= 10;
 	}
-	unsigned long long f = 1;
-	unsigned long long r = 0;
-	unsigned long long n;
-	for (int i=l-1; i>=0; i--){
-		n = r + (f * (s[i]-'0'));
-		if (n < r) return 0;
-		r = n;
-		f *= 10;
-	}
-	return r;
+	return result;
+}
+
+/* Error when opening to write */
+void error_open_create(char *filename) {
+	fprintf(stderr, "Error: could not open or create %s\n", filename);
+	exit(1);
+}
+
+/* Structure to work with the output file */
+struct filestruct {
+	int filedescriptor;
+	off_t size;
+};
+
+/* Open file to write */
+struct filestruct open_to_write(char *filename) {
+	struct stat fileinfo;	// file information from stat()
+	struct filestruct ret;
+	if ( stat(filename, &fileinfo) != 0) {
+		ret.filedescriptor = open(filename, O_CREAT, 0644);
+		if ( ret.filedescriptor < 0 ) error_open_create(filename);
+
+
+	} else {
+		fd = open(filename, O_WRONLY);
+		if ( fd < 0 ) {
+
+		}
+
+
+
+
+	fprintf(stderr, "Could not open or create %s\n", filename);
+	exit(1);
 }
 
 /* Close file and exit */
@@ -48,7 +84,7 @@ unsigned long long writeblocks(
 	unsigned long long towrite,
 	unsigned long long written,
 	int blocksize,
-	int pinterval,
+	clock_t clockdelta,
 	char *maxblock,
 	FILE *fptr
 	)
@@ -60,7 +96,7 @@ unsigned long long writeblocks(
 		while ( newwritten == blocksize ) {
 			newwritten = fwrite(maxblock, 1, blocksize, fptr);	// write one block
 			written += newwritten;
-			if ( blockcnt == pinterval ) {
+			if ( blockcnt ) {
 				printf("... %llu Bytes\n", written);
 				blockcnt = 1;
 				if ( --debug == 0 ) newwritten = 1;	// DEBUG
@@ -71,7 +107,7 @@ unsigned long long writeblocks(
 		while ( blockstw-- > 0 ) {	// write blocks
 			newwritten = fwrite(maxblock, 1, blocksize, fptr);	// write one block
 			written += newwritten;
-			if ( blockcnt == pinterval ) {
+			if ( blockcnt ) {
 				printf("... %llu Bytes\n", written);
 				blockcnt = 1;
 			} else blockcnt++;
@@ -113,6 +149,7 @@ int main(int argc, char **argv) {
 	const int DEFAULTPINTERVAL = 1000;
 	const int PINTERVALBASE = 500000;
 	/* CLI arguments */
+	/*
 	if ( argc < 2 ) {
 		fprintf(stderr, "Error: Missing argument(s)\n");
 		exit(1);
@@ -121,35 +158,42 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Error: too many arguments\n");
 		exit(1);
 	}
+	*/
 	FILE *fptr;	// file pointer for output
+	/*
 	fptr = fopen(argv[1], "w");	// open to write
 	if ( fptr == NULL ) {
 		fprintf(stderr, "Error: could not open output file %s\n", argv[1]);
 		exit(1);
 	}
-	int xtrasave = 1;	// 0 = do randomized overwrite
-	unsigned long long written = 0;	// to count written bytes
+	*/
+	int x_set = -1;	// 1 = do randomized overwrite first, 0 = one pass
+	int size_set = 0;	// 1 when size is set by size=...
 	unsigned long long towrite = 0;	// bytes to write, 0 = no limit
-	unsigned long long argull;
-	for (int i=2; i<argc; i++) {	// if there are more arguments
-		if ( argv[i][1] == 0 & ( argv[i][0] == 'x' | argv[i][0] == 'X'  ) )
-		{	// argument is x
-			if ( xtrasave == 0 ) {
-				fprintf(stderr, "Error: there is no double extra save mode\n");
-				error_close(fptr);
-			}
-			xtrasave = 0;
-		} else {
-			argull = readullong(argv[i]);
-			if ( argull != 0 ) {	// argument is bytes as ullong
-				if ( towrite > 0 ) {
-					fprintf(stderr, "Error: only 1x bytes to write makes sense\n");
-					error_close(fptr);
-				}
-			towrite = argull;
-			}
-		}
+	int fd;	// file descriptor for target
+	for (int i=1; i<argc; i++) {	// if there are more arguments
+		if ( strcmp(argv[i], "pass=1") == 0 ) {
+			if ( x_set != -1 ) error_wrong_arg();
+			x_set = 1;
+		} else if ( strcmp(argv[i], "pass=0") == 0 )  {
+			if ( x_set != -1 ) error_wrong_arg();
+			x_set = 0;
+		} else if ( strncmp(argv[i], "size=", 5) == 0 ) {
+			if ( size_set ) error_wrong_arg();
+			size_set = 1;
+			towrite = str_to_ull(argv[i]+5);
+		} else if ( strncmp(argv[i], "of=", 3) == 0 ) fd = open_to_write(argv[i]+3);
+		else fd = open_to_write(argv[i]);
 	}
+
+	printf("towrite: %llu\n", towrite);
+	printf("fd: %d\n", fd);
+	exit(0);
+
+	unsigned long long written = 0;	// to count written bytes
+	unsigned long long argull;
+	int xtrasave;
+
 	/* End of CLI */
 	char maxblock[MAXBLOCKSIZE];	// block to write
 	if ( xtrasave == 0 ) for (int i=0; i<MAXBLOCKSIZE; i++) maxblock[i] = (char)rand();
